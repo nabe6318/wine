@@ -63,11 +63,12 @@ all_cols = df.columns.tolist()
 default_label = "Class label" if "Class label" in df.columns else all_cols[0]
 label_col = st.selectbox("目的変数（クラス）列", options=all_cols, index=all_cols.index(default_label))
 
+# 初期候補
 default_feat1 = "Color intensity" if "Color intensity" in df.columns else (numeric_cols[1] if len(numeric_cols) > 1 else all_cols[1])
 default_feat2 = "Proline" if "Proline" in df.columns else (numeric_cols[2] if len(numeric_cols) > 2 else all_cols[2])
 
 feat_cols = st.multiselect(
-    "特徴量（ちょうど2列）", options=numeric_cols if len(numeric_cols) >= 2 else all_cols,
+    "特徴量（ちょうど2列）", options=(numeric_cols if len(numeric_cols) >= 2 else all_cols),
     default=[c for c in [default_feat1, default_feat2] if c in all_cols]
 )
 
@@ -75,15 +76,31 @@ if len(feat_cols) != 2:
     st.error("特徴量は **2列** だけ選んでください。")
     st.stop()
 
+# 対象列だけに絞って、数値変換＆NaN処理を行う安全な作業用DF
+work_df = df[[label_col] + feat_cols].copy()
+
+# 特徴量は強制的に数値化（文字列や混在を吸収）
+for c in feat_cols:
+    work_df[c] = pd.to_numeric(work_df[c], errors="coerce")
+
+# ラベルはエンコードするのでそのまま（文字列でもOK）
+before_drop = len(work_df)
+work_df = work_df.dropna(subset=feat_cols)  # 特徴量NaN行は除外
+dropped = before_drop - len(work_df)
+if dropped > 0:
+    st.warning(f"特徴量に NaN があったため **{dropped} 行** を除外しました。")
+
 # -----------------------------
 # 2.5) 特徴量の分布（ヒストグラム）
 # -----------------------------
 st.header("3) 特徴量の分布（ヒストグラム）")
-st.write("※ サンプル値入力の参考に、選択した2変数の分布を表示します。")
+st.write("※ サンプル値入力の前に、選択した2変数の分布を表示します。")
 
 for col in feat_cols:
+    vals = work_df[col].to_numpy()
+    vals = vals[np.isfinite(vals)]
     fig = plt.figure(figsize=(6, 3.5))
-    plt.hist(df[col].dropna().to_numpy(), bins=30)
+    plt.hist(vals, bins=30)
     plt.xlabel(col)
     plt.ylabel("count")
     plt.title(f"Histogram: {col}")
@@ -102,22 +119,25 @@ with col_b:
 with col_c:
     standardize = st.checkbox("標準化（StandardScaler）を使う", value=True)
 
-X = df[feat_cols].to_numpy()
-y_raw = df[label_col]
+X = work_df[feat_cols].to_numpy()
+y_raw = work_df[label_col]
 
+# ラベルを 0..K-1 にエンコード
 le = LabelEncoder()
-y = le.fit_transform(y_raw)
+y = le.fit_transform(y_raw.astype(str))
 
+# 学習/テスト分割
 X_train, X_test, y_train, y_test = train_test_split(
     X, y, test_size=float(test_size), random_state=int(random_state), stratify=y
 )
 
+# 標準化
 if standardize:
     sc = StandardScaler()
     X_train_std = sc.fit_transform(X_train)
     X_test_std = sc.transform(X_test)
 else:
-    sc = None  # 標準化なし
+    sc = None
     X_train_std = X_train.copy()
     X_test_std = X_test.copy()
 
@@ -212,61 +232,78 @@ if train_button:
         st.write(model.intercept_)
 
     # -----------------------------
-    # 6) 未知データ 1点の予測
+    # 6) 未知データ 1点の予測（安全な number_input）
     # -----------------------------
     st.header("6) 未知データ（1サンプル）の予測")
 
-    # 入力補助のために、全データ分布から min/max/median を使う
-    f1_min, f1_max = float(df[feat_cols[0]].min()), float(df[feat_cols[0]].max())
-    f2_min, f2_max = float(df[feat_cols[1]].min()), float(df[feat_cols[1]].max())
-    f1_med, f2_med = float(df[feat_cols[0]].median()), float(df[feat_cols[1]].median())
+    def safe_stats(series: pd.Series):
+        vals = pd.to_numeric(series, errors="coerce").to_numpy()
+        vals = vals[np.isfinite(vals)]
+        if vals.size == 0:
+            return np.nan, np.nan, np.nan
+        return np.nanmin(vals), np.nanmax(vals), np.nanmedian(vals)
+
+    def number_input_safe(label: str, default: float, vmin: float, vmax: float):
+        """
+        min/max が有限かつ min<max のときだけ境界をセット。
+        そうでなければ境界なし & step=1.0 にすることでエラーを回避。
+        """
+        kwargs = {"value": float(default) if np.isfinite(default) else 0.0, "format": "%.6f"}
+        if np.isfinite(vmin) and np.isfinite(vmax) and (vmax > vmin):
+            step = (vmax - vmin) / 100.0
+            if step <= 0 or not np.isfinite(step):
+                step = 1.0
+            kwargs.update(
+                min_value=float(vmin),
+                max_value=float(vmax),
+                step=float(step),
+            )
+        else:
+            kwargs.update(step=1.0)
+        return st.number_input(label, **kwargs)
+
+    f1_min, f1_max, f1_med = safe_stats(work_df[feat_cols[0]])
+    f2_min, f2_max, f2_med = safe_stats(work_df[feat_cols[1]])
 
     st.write("※ 入力は **生の値**（標準化前）を入れてください。必要に応じて内部で同じスケーラーを適用します。")
 
-    u_f1 = st.number_input(
-        f"{feat_cols[0]} (sample)",
-        value=f1_med,
-        min_value=f1_min, max_value=f1_max,
-        step=(f1_max - f1_min) / 100 if f1_max > f1_min else 1.0,
-        format="%.6f"
-    )
-    u_f2 = st.number_input(
-        f"{feat_cols[1]} (sample)",
-        value=f2_med,
-        min_value=f2_min, max_value=f2_max,
-        step=(f2_max - f2_min) / 100 if f2_max > f2_min else 1.0,
-        format="%.6f"
-    )
+    u_f1 = number_input_safe(f"{feat_cols[0]} (sample)", f1_med, f1_min, f1_max)
+    u_f2 = number_input_safe(f"{feat_cols[1]} (sample)", f2_med, f2_min, f2_max)
 
     predict_btn = st.button("未知サンプルを予測", type="primary")
 
     if predict_btn:
-        unknown_raw = np.array([[u_f1, u_f2]], dtype=float)
+        try:
+            unknown_raw = np.array([[float(u_f1), float(u_f2)]], dtype=float)
 
-        if standardize and sc is not None:
-            unknown_std = sc.transform(unknown_raw)
-        else:
-            unknown_std = unknown_raw
+            if standardize and sc is not None:
+                unknown_std = sc.transform(unknown_raw)
+            else:
+                unknown_std = unknown_raw
 
-        pred_idx = model.predict(unknown_std)
-        pred_prob = model.predict_proba(unknown_std)
-        pred_label = le.inverse_transform(pred_idx)
+            pred_idx = model.predict(unknown_std)
+            # liblinear でも predict_proba は利用可（ovr）
+            pred_prob = model.predict_proba(unknown_std)
+            pred_label = le.inverse_transform(pred_idx)
 
-        result_df = pd.DataFrame({
-            "sample": ["sample_1"],
-            feat_cols[0]: [unknown_raw[0, 0]],
-            feat_cols[1]: [unknown_raw[0, 1]],
-            "pred_class": [pred_label[0]],
-            "pred_index": [int(pred_idx[0])]
-        })
+            result_df = pd.DataFrame({
+                "sample": ["sample_1"],
+                feat_cols[0]: [unknown_raw[0, 0]],
+                feat_cols[1]: [unknown_raw[0, 1]],
+                "pred_class": [pred_label[0]],
+                "pred_index": [int(pred_idx[0])]
+            })
 
-        st.subheader("予測結果（クラス）")
-        st.dataframe(result_df, use_container_width=True)
+            st.subheader("予測結果（クラス）")
+            st.dataframe(result_df, use_container_width=True)
 
-        # 確率も表示
-        prob_cols = [f"proba_{c}" for c in le.classes_]
-        prob_df = pd.DataFrame(pred_prob, columns=prob_cols, index=["sample_1"])
-        st.subheader("予測確率")
-        st.dataframe(prob_df, use_container_width=True)
+            prob_cols = [f"proba_{c}" for c in le.classes_]
+            prob_df = pd.DataFrame(pred_prob, columns=prob_cols, index=["sample_1"])
+            st.subheader("予測確率")
+            st.dataframe(prob_df, use_container_width=True)
+        except Exception as e:
+            st.error("未知サンプルの予測でエラーが発生しました。入力値と列の型をご確認ください。")
+            st.exception(e)
 
 st.caption("※ 決定境界プロット（mlxtend）は**2次元特徴量のみ対応**です。3列以上は選ばないでください。")
+
