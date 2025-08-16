@@ -11,10 +11,10 @@ from mlxtend.plotting import plot_decision_regions
 
 st.set_page_config(page_title="Wine Logistic Regression Demo", layout="centered")
 
-st.title("🍷 ロジスティック回帰（2特徴 × 多クラス）デモ")
+st.title("🍷 ロジスティック回帰（2特徴 × 多クラス）高冷地先端デモ　信大雑草研作成")
 st.write(
     "CSV をアップロードして、**2つの特徴量**と**目的変数**を選び、"
-    "ロジスティック回帰で学習・評価・決定境界の可視化を行います。"
+    "ロジスティック回帰で学習・評価・決定境界の可視化＆未知データ予測を行います。"
 )
 
 # -----------------------------
@@ -34,15 +34,14 @@ with sample_hint_expander:
  'Proline']""",
         language="text",
     )
-    st.write("※ UCI Wine データと同じ並びの場合、"
-             "`Color intensity`（色; 10列）と `Proline`（13列）を使うと、"
-             "元コードと同じ条件になります。")
+    st.write("※ UCI Wine と同じ並びの場合、"
+             "`Color intensity` と `Proline` を使うと、元コードと同じ条件です。")
 
 if uploaded is None:
     st.info("CSV をアップロードしてください。")
     st.stop()
 
-# CSV 読み込み（まず header=0 を試し、ダメなら header=None）
+# CSV 読み込み
 try:
     df = pd.read_csv(uploaded)
 except Exception:
@@ -51,7 +50,6 @@ except Exception:
 
 st.subheader("先頭5行")
 st.dataframe(df.head(), use_container_width=True)
-
 st.write("データ形状:", df.shape)
 
 # -----------------------------
@@ -59,21 +57,17 @@ st.write("データ形状:", df.shape)
 # -----------------------------
 st.header("2) 列の指定")
 
-# 数値列のみ候補にする（特徴量は数値が望ましいため）
 numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
 all_cols = df.columns.tolist()
 
-# 目的変数（ラベル）
 default_label = "Class label" if "Class label" in df.columns else all_cols[0]
-label_col = st.selectbox("目的変数（クラス）列を選択", options=all_cols, index=all_cols.index(default_label))
+label_col = st.selectbox("目的変数（クラス）列", options=all_cols, index=all_cols.index(default_label))
 
-# 特徴量（2列のみ）
-# デフォルトは Wine と同様に Color intensity, Proline があればそれにする
 default_feat1 = "Color intensity" if "Color intensity" in df.columns else (numeric_cols[1] if len(numeric_cols) > 1 else all_cols[1])
 default_feat2 = "Proline" if "Proline" in df.columns else (numeric_cols[2] if len(numeric_cols) > 2 else all_cols[2])
 
 feat_cols = st.multiselect(
-    "特徴量（ちょうど2列を選択）", options=numeric_cols if len(numeric_cols) >= 2 else all_cols,
+    "特徴量（ちょうど2列）", options=numeric_cols if len(numeric_cols) >= 2 else all_cols,
     default=[c for c in [default_feat1, default_feat2] if c in all_cols]
 )
 
@@ -94,26 +88,22 @@ with col_b:
 with col_c:
     standardize = st.checkbox("標準化（StandardScaler）を使う", value=True)
 
-# X, y 準備
 X = df[feat_cols].to_numpy()
 y_raw = df[label_col]
 
-# y を 0..K-1 の整数にエンコード（元のコードの「-1」相当の整形を安全に）
-# 文字列や1,2,3以外でも OK にする
 le = LabelEncoder()
 y = le.fit_transform(y_raw)
 
-# 学習/テスト分割
 X_train, X_test, y_train, y_test = train_test_split(
     X, y, test_size=float(test_size), random_state=int(random_state), stratify=y
 )
 
-# 標準化
 if standardize:
     sc = StandardScaler()
     X_train_std = sc.fit_transform(X_train)
     X_test_std = sc.transform(X_test)
 else:
+    sc = None  # 標準化なし
     X_train_std = X_train.copy()
     X_test_std = X_test.copy()
 
@@ -137,7 +127,6 @@ with col3:
 with col4:
     max_iter = st.number_input("max_iter", min_value=100, max_value=5000, value=200, step=50)
 
-# solver は liblinear（ovr & l2 と相性良）
 solver = "liblinear" if multi_class == "ovr" else "lbfgs"
 
 model = LogisticRegression(
@@ -152,18 +141,17 @@ model = LogisticRegression(
 train_button = st.button("学習・評価を実行", type="primary")
 
 if train_button:
-    # 学習
+    # ===== 学習 =====
     model.fit(X_train_std, y_train)
 
-    # 学習データ精度
+    # ===== 精度 =====
     y_train_pred = model.predict(X_train_std)
     train_acc = accuracy_score(y_train, y_train_pred)
 
-    # テストデータ精度
     y_test_pred = model.predict(X_test_std)
     test_acc = accuracy_score(y_test, y_test_pred)
 
-    st.success(f"学習完了 ✅  |  訓練正解率: **{train_acc:.3f}**  /  テスト正解率: **{test_acc:.3f}**")
+    st.success(f"学習完了 ✅  |  訓練: **{train_acc:.3f}**  /  テスト: **{test_acc:.3f}**")
 
     with st.expander("詳しいレポート（テスト）"):
         st.text("Classification report (test):")
@@ -173,7 +161,7 @@ if train_button:
                                   index=[f"true_{c}" for c in le.classes_],
                                   columns=[f"pred_{c}" for c in le.classes_]))
 
-    # 決定境界（訓練）
+    # ===== 決定境界（訓練） =====
     st.subheader("決定境界（訓練データ）")
     fig1 = plt.figure(figsize=(7, 4))
     plot_decision_regions(X_train_std, y_train, clf=model)
@@ -182,7 +170,7 @@ if train_button:
     plt.title("Decision Regions - Train")
     st.pyplot(fig1, clear_figure=True)
 
-    # 決定境界（テスト）
+    # ===== 決定境界（テスト） =====
     st.subheader("決定境界（テストデータ）")
     fig2 = plt.figure(figsize=(7, 4))
     plot_decision_regions(X_test_std, y_test, clf=model)
@@ -191,11 +179,10 @@ if train_button:
     plt.title("Decision Regions - Test")
     st.pyplot(fig2, clear_figure=True)
 
-    # 係数と切片（クラスごと）
+    # ===== 係数と切片 =====
     st.subheader("モデル係数と切片")
     coef_df = pd.DataFrame(model.coef_, columns=[f"{feat_cols[0]}(coef)", f"{feat_cols[1]}(coef)"])
     coef_df.insert(0, "class_index", np.arange(coef_df.shape[0]))
-    coef_df["class_label (encoded)"] = coef_df["class_index"]
     coef_df["original_label"] = [le.classes_[i] if i < len(le.classes_) else None for i in coef_df["class_index"]]
     st.dataframe(coef_df, use_container_width=True)
 
@@ -204,10 +191,71 @@ if train_button:
     intercept_df["original_label"] = [le.classes_[i] if i < len(le.classes_) else None for i in intercept_df["class_index"]]
     st.dataframe(intercept_df, use_container_width=True)
 
-    with st.expander("NumPy配列で出力（print と同等）"):
+    with st.expander("NumPy配列（print 相当）"):
         st.write("`model.coef_`")
         st.write(model.coef_)
         st.write("`model.intercept_`")
         st.write(model.intercept_)
 
+    # -----------------------------
+    # 5) 未知データ 2点の予測
+    # -----------------------------
+    st.header("5) 未知データ（2サンプル）の予測")
+
+    # 入力補助のために、学習データのmin/max/medianを取得
+    train_df = pd.DataFrame(X_train, columns=feat_cols)
+    f1_min, f1_max, f1_med = float(train_df[feat_cols[0]].min()), float(train_df[feat_cols[0]].max()), float(train_df[feat_cols[0]].median())
+    f2_min, f2_max, f2_med = float(train_df[feat_cols[1]].min()), float(train_df[feat_cols[1]].max()), float(train_df[feat_cols[1]].median())
+
+    st.write("※ 入力は **生の値**（標準化前）を入れてください。必要に応じて内部で同じスケーラーを適用します。")
+
+    c1, c2 = st.columns(2, vertical_alignment="center")
+    with c1:
+        st.markdown("**サンプル 1**")
+        u1_f1 = st.number_input(f"{feat_cols[0]} (sample 1)", value=f1_med, min_value=f1_min, max_value=f1_max, step=(f1_max-f1_min)/100 if f1_max>f1_min else 1.0, format="%.6f")
+        u1_f2 = st.number_input(f"{feat_cols[1]} (sample 1)", value=f2_med, min_value=f2_min, max_value=f2_max, step=(f2_max-f2_min)/100 if f2_max>f2_min else 1.0, format="%.6f")
+    with c2:
+        st.markdown("**サンプル 2**")
+        u2_f1 = st.number_input(f"{feat_cols[0]} (sample 2)", value=f1_med, min_value=f1_min, max_value=f1_max, step=(f1_max-f1_min)/100 if f1_max>f1_min else 1.0, format="%.6f")
+        u2_f2 = st.number_input(f"{feat_cols[1]} (sample 2)", value=f2_med, min_value=f2_min, max_value=f2_max, step=(f2_max-f2_min)/100 if f2_max>f2_min else 1.0, format="%.6f")
+
+    predict_btn = st.button("未知サンプルを予測", type="primary")
+
+    if predict_btn:
+        # 2サンプルを配列化
+        unknown_raw = np.array([[u1_f1, u1_f2],
+                                [u2_f1, u2_f2]], dtype=float)
+
+        # 学習時と同じ前処理（標準化）
+        if standardize and sc is not None:
+            unknown_std = sc.transform(unknown_raw)
+        else:
+            unknown_std = unknown_raw
+
+        # 予測
+        pred_idx = model.predict(unknown_std)
+        pred_prob = model.predict_proba(unknown_std)
+
+        # ラベル名へ戻す
+        pred_label = le.inverse_transform(pred_idx)
+
+        # 結果表
+        result_df = pd.DataFrame({
+            "sample": ["sample_1", "sample_2"],
+            feat_cols[0]: unknown_raw[:,0],
+            feat_cols[1]: unknown_raw[:,1],
+            "pred_class": pred_label,
+            "pred_index": pred_idx
+        })
+
+        st.subheader("予測結果（クラス）")
+        st.dataframe(result_df, use_container_width=True)
+
+        # 確率も表示（クラスごとに列展開）
+        prob_cols = [f"proba_{c}" for c in le.classes_]
+        prob_df = pd.DataFrame(pred_prob, columns=prob_cols, index=["sample_1","sample_2"])
+        st.subheader("予測確率")
+        st.dataframe(prob_df, use_container_width=True)
+
 st.caption("※ 決定境界プロット（mlxtend）は**2次元特徴量のみ対応**です。3列以上は選ばないでください。")
+
