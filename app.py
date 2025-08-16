@@ -11,10 +11,10 @@ from mlxtend.plotting import plot_decision_regions
 
 st.set_page_config(page_title="Wine Logistic Regression Demo", layout="centered")
 
-st.title("🍷 ロジスティック回帰（2特徴 × 多クラス）高冷地先端デモ　信大雑草研作成")
+st.title("🍷 ロジスティック回帰（2特徴 × 多クラス）デモ")
 st.write(
     "CSV をアップロードして、**2つの特徴量**と**目的変数**を選び、"
-    "ロジスティック回帰で学習・評価・決定境界の可視化＆未知データ予測を行います。"
+    "ロジスティック回帰で学習・評価・決定境界の可視化＆未知サンプル予測を行います。"
 )
 
 # -----------------------------
@@ -76,9 +76,23 @@ if len(feat_cols) != 2:
     st.stop()
 
 # -----------------------------
+# 2.5) 特徴量の分布（ヒストグラム）
+# -----------------------------
+st.header("3) 特徴量の分布（ヒストグラム）")
+st.write("※ サンプル値入力の参考に、選択した2変数の分布を表示します。")
+
+for col in feat_cols:
+    fig = plt.figure(figsize=(6, 3.5))
+    plt.hist(df[col].dropna().to_numpy(), bins=30)
+    plt.xlabel(col)
+    plt.ylabel("count")
+    plt.title(f"Histogram: {col}")
+    st.pyplot(fig, clear_figure=True)
+
+# -----------------------------
 # 3) 前処理と分割
 # -----------------------------
-st.header("3) 前処理とデータ分割")
+st.header("4) 前処理とデータ分割")
 
 col_a, col_b, col_c = st.columns(3)
 with col_a:
@@ -115,7 +129,7 @@ st.write(
 # -----------------------------
 # 4) モデル設定と学習
 # -----------------------------
-st.header("4) モデル設定と学習（LogisticRegression）")
+st.header("5) モデル設定と学習（LogisticRegression）")
 
 col1, col2, col3, col4 = st.columns(4)
 with col1:
@@ -198,64 +212,61 @@ if train_button:
         st.write(model.intercept_)
 
     # -----------------------------
-    # 5) 未知データ 2点の予測
+    # 6) 未知データ 1点の予測
     # -----------------------------
-    st.header("5) 未知データ（2サンプル）の予測")
+    st.header("6) 未知データ（1サンプル）の予測")
 
-    # 入力補助のために、学習データのmin/max/medianを取得
-    train_df = pd.DataFrame(X_train, columns=feat_cols)
-    f1_min, f1_max, f1_med = float(train_df[feat_cols[0]].min()), float(train_df[feat_cols[0]].max()), float(train_df[feat_cols[0]].median())
-    f2_min, f2_max, f2_med = float(train_df[feat_cols[1]].min()), float(train_df[feat_cols[1]].max()), float(train_df[feat_cols[1]].median())
+    # 入力補助のために、全データ分布から min/max/median を使う
+    f1_min, f1_max = float(df[feat_cols[0]].min()), float(df[feat_cols[0]].max())
+    f2_min, f2_max = float(df[feat_cols[1]].min()), float(df[feat_cols[1]].max())
+    f1_med, f2_med = float(df[feat_cols[0]].median()), float(df[feat_cols[1]].median())
 
     st.write("※ 入力は **生の値**（標準化前）を入れてください。必要に応じて内部で同じスケーラーを適用します。")
 
-    c1, c2 = st.columns(2, vertical_alignment="center")
-    with c1:
-        st.markdown("**サンプル 1**")
-        u1_f1 = st.number_input(f"{feat_cols[0]} (sample 1)", value=f1_med, min_value=f1_min, max_value=f1_max, step=(f1_max-f1_min)/100 if f1_max>f1_min else 1.0, format="%.6f")
-        u1_f2 = st.number_input(f"{feat_cols[1]} (sample 1)", value=f2_med, min_value=f2_min, max_value=f2_max, step=(f2_max-f2_min)/100 if f2_max>f2_min else 1.0, format="%.6f")
-    with c2:
-        st.markdown("**サンプル 2**")
-        u2_f1 = st.number_input(f"{feat_cols[0]} (sample 2)", value=f1_med, min_value=f1_min, max_value=f1_max, step=(f1_max-f1_min)/100 if f1_max>f1_min else 1.0, format="%.6f")
-        u2_f2 = st.number_input(f"{feat_cols[1]} (sample 2)", value=f2_med, min_value=f2_min, max_value=f2_max, step=(f2_max-f2_min)/100 if f2_max>f2_min else 1.0, format="%.6f")
+    u_f1 = st.number_input(
+        f"{feat_cols[0]} (sample)",
+        value=f1_med,
+        min_value=f1_min, max_value=f1_max,
+        step=(f1_max - f1_min) / 100 if f1_max > f1_min else 1.0,
+        format="%.6f"
+    )
+    u_f2 = st.number_input(
+        f"{feat_cols[1]} (sample)",
+        value=f2_med,
+        min_value=f2_min, max_value=f2_max,
+        step=(f2_max - f2_min) / 100 if f2_max > f2_min else 1.0,
+        format="%.6f"
+    )
 
     predict_btn = st.button("未知サンプルを予測", type="primary")
 
     if predict_btn:
-        # 2サンプルを配列化
-        unknown_raw = np.array([[u1_f1, u1_f2],
-                                [u2_f1, u2_f2]], dtype=float)
+        unknown_raw = np.array([[u_f1, u_f2]], dtype=float)
 
-        # 学習時と同じ前処理（標準化）
         if standardize and sc is not None:
             unknown_std = sc.transform(unknown_raw)
         else:
             unknown_std = unknown_raw
 
-        # 予測
         pred_idx = model.predict(unknown_std)
         pred_prob = model.predict_proba(unknown_std)
-
-        # ラベル名へ戻す
         pred_label = le.inverse_transform(pred_idx)
 
-        # 結果表
         result_df = pd.DataFrame({
-            "sample": ["sample_1", "sample_2"],
-            feat_cols[0]: unknown_raw[:,0],
-            feat_cols[1]: unknown_raw[:,1],
-            "pred_class": pred_label,
-            "pred_index": pred_idx
+            "sample": ["sample_1"],
+            feat_cols[0]: [unknown_raw[0, 0]],
+            feat_cols[1]: [unknown_raw[0, 1]],
+            "pred_class": [pred_label[0]],
+            "pred_index": [int(pred_idx[0])]
         })
 
         st.subheader("予測結果（クラス）")
         st.dataframe(result_df, use_container_width=True)
 
-        # 確率も表示（クラスごとに列展開）
+        # 確率も表示
         prob_cols = [f"proba_{c}" for c in le.classes_]
-        prob_df = pd.DataFrame(pred_prob, columns=prob_cols, index=["sample_1","sample_2"])
+        prob_df = pd.DataFrame(pred_prob, columns=prob_cols, index=["sample_1"])
         st.subheader("予測確率")
         st.dataframe(prob_df, use_container_width=True)
 
 st.caption("※ 決定境界プロット（mlxtend）は**2次元特徴量のみ対応**です。3列以上は選ばないでください。")
-
