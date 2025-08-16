@@ -11,7 +11,7 @@ from mlxtend.plotting import plot_decision_regions
 
 st.set_page_config(page_title="Wine Logistic Regression Demo", layout="centered")
 
-# ===== セッション初期化 =====
+# ===== セッション初期化 | Initialize session state =====
 for k, v in {
     "trained": False,
     "clf": None,
@@ -28,19 +28,22 @@ for k, v in {
     if k not in st.session_state:
         st.session_state[k] = v
 
-st.title("🍷 ロジスティック回帰（2特徴 × 多クラス）デモ")
+# ===== タイトル | Title =====
+st.title("🍷 ロジスティック回帰（2特徴×多クラス）デモ | Logistic Regression (2 features, multiclass) Demo")
 st.write(
-    "CSV をアップロードして、**2つの特徴量**と**目的変数**を選び、"
+    "CSV をアップロードして **2つの特徴量** と **目的変数** を選び、"
     "ロジスティック回帰で学習・評価・決定境界の可視化＆未知サンプル予測を行います。"
+    " | Upload a CSV, select **two features** and a **target label**, "
+    "then train logistic regression, evaluate, visualize decision boundaries, and predict an unknown sample."
 )
 
 # -----------------------------
-# 1) データ入力
+# 1) データをアップロード | Upload data
 # -----------------------------
-st.header("1) データをアップロード")
-uploaded = st.file_uploader("CSVファイルを選択（UTF-8想定）", type=["csv"])
+st.header("1) データをアップロード | Upload CSV Data")
+uploaded = st.file_uploader("CSVファイルを選択（UTF-8想定） | Select a CSV file (UTF-8)", type=["csv"])
 
-sample_hint_expander = st.expander("ワインデータの列名（参考）")
+sample_hint_expander = st.expander("ワインデータの列名（参考） | Sample wine column names (reference)")
 with sample_hint_expander:
     st.code(
         """['Class label', 'Alcohol', 'Malic acid', 'Ash',
@@ -50,46 +53,54 @@ with sample_hint_expander:
  'Proline']""",
         language="text",
     )
-    st.write("※ UCI Wine と同じ並びの場合、`Color intensity` と `Proline` を使うと元コードと同条件。")
+    st.write(
+        "UCI Wine と同じ並びの場合、`Color intensity` と `Proline` を使うと元コードと同条件です。"
+        " | If your CSV matches the UCI Wine columns, using `Color intensity` and `Proline` will replicate the original setup."
+    )
 
 if uploaded is None:
-    st.info("CSV をアップロードしてください。")
+    st.info("CSV をアップロードしてください。 | Please upload a CSV file.")
     st.stop()
 
-# CSV 読み込み（header=0 を試し、失敗したら header=None）
+# CSV 読み込み | Read CSV
 try:
     df = pd.read_csv(uploaded)
 except Exception:
     uploaded.seek(0)
     df = pd.read_csv(uploaded, header=None)
 
-st.subheader("先頭5行")
+st.subheader("先頭5行 | First 5 rows")
 st.dataframe(df.head(), use_container_width=True)
-st.write("データ形状:", df.shape)
+st.write("データ形状 | Shape:", df.shape)
 
 # -----------------------------
-# 2) 列の指定
+# 2) 列の指定 | Select columns
 # -----------------------------
-st.header("2) 列の指定")
+st.header("2) 列の指定 | Select Columns")
+
 numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
 all_cols = df.columns.tolist()
 
 default_label = "Class label" if "Class label" in df.columns else all_cols[0]
-label_col = st.selectbox("目的変数（クラス）列", options=all_cols, index=all_cols.index(default_label))
+label_col = st.selectbox(
+    "目的変数（クラス）列 | Target label column",
+    options=all_cols,
+    index=all_cols.index(default_label)
+)
 
 default_feat1 = "Color intensity" if "Color intensity" in df.columns else (numeric_cols[1] if len(numeric_cols) > 1 else all_cols[1])
 default_feat2 = "Proline" if "Proline" in df.columns else (numeric_cols[2] if len(numeric_cols) > 2 else all_cols[2])
 
 feat_cols = st.multiselect(
-    "特徴量（ちょうど2列）",
+    "特徴量（ちょうど2列） | Features (select exactly 2)",
     options=(numeric_cols if len(numeric_cols) >= 2 else all_cols),
     default=[c for c in [default_feat1, default_feat2] if c in all_cols]
 )
 if len(feat_cols) != 2:
-    st.error("特徴量は **2列** だけ選んでください。")
+    st.error("特徴量は **2列** だけ選んでください。 | Please select **exactly 2** feature columns.")
     st.stop()
 
-# 作業用DF（数値化＆NaN除外）
+# 作業用DF（数値化＆NaN除外） | Working DF (coerce to numeric & drop NaN)
 work_df = df[[label_col] + feat_cols].copy()
 for c in feat_cols:
     work_df[c] = pd.to_numeric(work_df[c], errors="coerce")
@@ -97,34 +108,39 @@ before_drop = len(work_df)
 work_df = work_df.dropna(subset=feat_cols)
 dropped = before_drop - len(work_df)
 if dropped > 0:
-    st.warning(f"特徴量に NaN があったため **{dropped} 行** を除外しました。")
+    st.warning(
+        f"特徴量に NaN があったため **{dropped} 行** を除外しました。"
+        " | Rows with NaN in selected features were removed: **{dropped}**."
+    )
 
 # -----------------------------
-# 2.5) 特徴量の分布（ヒストグラム）
+# 3) 特徴量の分布（ヒストグラム） | Feature distributions (histograms)
 # -----------------------------
-st.header("3) 特徴量の分布（ヒストグラム）")
-st.write("※ サンプル値入力の前に、選択した2変数の分布を表示。")
+st.header("3) 特徴量の分布（ヒストグラム） | Feature Distributions (Histograms)")
+st.write(
+    "サンプル値入力の前に分布を確認します。 | Check distributions before entering a sample value."
+)
 for col in feat_cols:
     vals = pd.to_numeric(work_df[col], errors="coerce").to_numpy()
     vals = vals[np.isfinite(vals)]
     fig = plt.figure(figsize=(6, 3.5))
     plt.hist(vals, bins=30)
-    plt.xlabel(col)
-    plt.ylabel("count")
-    plt.title(f"Histogram: {col}")
+    plt.xlabel(f"{col}")
+    plt.ylabel("度数 | Count")
+    plt.title(f"ヒストグラム | Histogram: {col}")
     st.pyplot(fig, clear_figure=True)
 
 # -----------------------------
-# 3) 前処理と分割
+# 4) 前処理とデータ分割 | Preprocessing & split
 # -----------------------------
-st.header("4) 前処理とデータ分割")
+st.header("4) 前処理とデータ分割 | Preprocessing & Train/Test Split")
 col_a, col_b, col_c = st.columns(3)
 with col_a:
-    test_size = st.slider("テストサイズ", 0.1, 0.5, 0.2, 0.05)
+    test_size = st.slider("テストサイズ | Test size", 0.1, 0.5, 0.2, 0.05)
 with col_b:
-    random_state = st.number_input("random_state", min_value=0, max_value=9999, value=0, step=1)
+    random_state = st.number_input("random_state（乱数シード） | random_state", min_value=0, max_value=9999, value=0, step=1)
 with col_c:
-    standardize = st.checkbox("標準化（StandardScaler）を使う", value=True)
+    standardize = st.checkbox("標準化（StandardScaler）を使う | Use standardization (StandardScaler)", value=True)
 
 X = work_df[feat_cols].to_numpy()
 y_raw = work_df[label_col]
@@ -147,21 +163,22 @@ else:
 st.write(
     f"**X_train**: {X_train_std.shape} / **y_train**: {y_train.shape}  |  "
     f"**X_test**: {X_test_std.shape} / **y_test**: {y_test.shape}"
+    " | Shapes shown above."
 )
 
 # -----------------------------
-# 4) モデル設定と学習
+# 5) モデル設定と学習 | Model config & training
 # -----------------------------
-st.header("5) モデル設定と学習（LogisticRegression）")
+st.header("5) モデル設定と学習（ロジスティック回帰） | Model Setup & Training (Logistic Regression)")
 col1, col2, col3, col4 = st.columns(4)
 with col1:
-    C = st.select_slider("正則化強度 C", options=[0.01, 0.1, 0.5, 1.0, 2.0, 10.0], value=1.0)
+    C = st.select_slider("正則化C | Regularization C", options=[0.01, 0.1, 0.5, 1.0, 2.0, 10.0], value=1.0)
 with col2:
-    penalty = st.selectbox("ペナルティ", options=["l2"], index=0)
+    penalty = st.selectbox("ペナルティ | Penalty", options=["l2"], index=0)
 with col3:
-    multi_class = st.selectbox("multi_class", options=["ovr", "multinomial"], index=0)
+    multi_class = st.selectbox("multi_class", options=["ovr", "multinomial"], index=0, help="多クラス戦略 | Multiclass strategy")
 with col4:
-    max_iter = st.number_input("max_iter", min_value=100, max_value=5000, value=200, step=50)
+    max_iter = st.number_input("max_iter（最大反復） | max_iter", min_value=100, max_value=5000, value=200, step=50)
 
 solver = "liblinear" if multi_class == "ovr" else "lbfgs"
 model = LogisticRegression(
@@ -175,27 +192,27 @@ model = LogisticRegression(
 
 col_btn1, col_btn2 = st.columns([1,1])
 with col_btn1:
-    train_button = st.button("学習・評価を実行", type="primary")
+    train_button = st.button("学習・評価を実行 | Train & Evaluate", type="primary")
 with col_btn2:
-    reset_button = st.button("🧹 モデルをリセット", type="secondary")
+    reset_button = st.button("🧹 モデルをリセット | Reset Model", type="secondary")
 
 if reset_button:
     for k in ["trained","clf","scaler","le","feat_cols_trained","standardize_trained",
               "metrics","X_train_std","X_test_std","y_train","y_test"]:
         st.session_state[k] = None if k != "trained" else False
-    st.success("学習状態をリセットしました。")
+    st.success("学習状態をリセットしました。 | Training state has been reset.")
 
 if train_button:
-    # 学習
+    # 学習 | Fit
     model.fit(X_train_std, y_train)
 
-    # 精度
+    # 精度 | Metrics
     y_train_pred = model.predict(X_train_std)
     y_test_pred = model.predict(X_test_std)
     train_acc = accuracy_score(y_train, y_train_pred)
     test_acc = accuracy_score(y_test, y_test_pred)
 
-    # セッションに保存（再実行でも保持）
+    # 状態保持 | Persist to session
     st.session_state.trained = True
     st.session_state.clf = model
     st.session_state.scaler = sc
@@ -208,34 +225,53 @@ if train_button:
     st.session_state.y_train = y_train
     st.session_state.y_test = y_test
 
-# ===== 学習後の可視化／情報 =====
+# ===== 学習後の可視化／情報 | Post-training visuals/info =====
 if st.session_state.trained:
-    # 列が変わってないかチェック
     if st.session_state.feat_cols_trained != feat_cols or st.session_state.standardize_trained != standardize:
-        st.warning("学習時の設定と異なります。**再学習**してください。")
+        st.warning(
+            "学習時の設定と異なります。再学習してください。"
+            " | Current settings differ from training settings. Please retrain."
+        )
     else:
-        st.success(f"学習完了 ✅ | 訓練: **{st.session_state.metrics['train_acc']:.3f}** / テスト: **{st.session_state.metrics['test_acc']:.3f}**")
+        st.success(
+            f"学習完了 ✅ | 訓練: **{st.session_state.metrics['train_acc']:.3f}**"
+            f" / テスト: **{st.session_state.metrics['test_acc']:.3f}**"
+            " | Training completed with the accuracies shown."
+        )
 
-        # 決定境界（訓練）
-        st.subheader("決定境界（訓練データ）")
+        # 決定境界（訓練） | Decision regions (train)
+        st.subheader("決定境界（訓練データ） | Decision Regions (Train)")
         fig1 = plt.figure(figsize=(7, 4))
         plot_decision_regions(st.session_state.X_train_std, st.session_state.y_train, clf=st.session_state.clf)
-        plt.xlabel(feat_cols[0] + (" (std)" if st.session_state.standardize_trained else ""))
-        plt.ylabel(feat_cols[1] + (" (std)" if st.session_state.standardize_trained else ""))
-        plt.title("Decision Regions - Train")
+        plt.xlabel(feat_cols[0] + (" (標準化) | (std)" if st.session_state.standardize_trained else ""))
+        plt.ylabel(feat_cols[1] + (" (標準化) | (std)" if st.session_state.standardize_trained else ""))
+        plt.title("訓練データ | Train")
         st.pyplot(fig1, clear_figure=True)
 
-        # 決定境界（テスト）
-        st.subheader("決定境界（テストデータ）")
+        # 決定境界（テスト） | Decision regions (test)
+        st.subheader("決定境界（テストデータ） | Decision Regions (Test)")
         fig2 = plt.figure(figsize=(7, 4))
         plot_decision_regions(st.session_state.X_test_std, st.session_state.y_test, clf=st.session_state.clf)
-        plt.xlabel(feat_cols[0] + (" (std)" if st.session_state.standardize_trained else ""))
-        plt.ylabel(feat_cols[1] + (" (std)" if st.session_state.standardize_trained else ""))
-        plt.title("Decision Regions - Test")
+        plt.xlabel(feat_cols[0] + (" (標準化) | (std)" if st.session_state.standardize_trained else ""))
+        plt.ylabel(feat_cols[1] + (" (標準化) | (std)" if st.session_state.standardize_trained else ""))
+        plt.title("テストデータ | Test")
         st.pyplot(fig2, clear_figure=True)
 
-        # 係数・切片
-        st.subheader("モデル係数と切片")
+        # 分類レポート | Classification report
+        with st.expander("詳しいレポート（テスト） | Detailed report (test)"):
+            st.text("分類レポート | Classification report")
+            y_test_pred = st.session_state.clf.predict(st.session_state.X_test_std)
+            st.text(classification_report(st.session_state.y_test, y_test_pred,
+                                          target_names=[str(c) for c in st.session_state.le.classes_]))
+            st.write("混同行列 | Confusion matrix")
+            cm = confusion_matrix(st.session_state.y_test, y_test_pred)
+            st.dataframe(pd.DataFrame(cm,
+                                      index=[f"true_{c}" for c in st.session_state.le.classes_],
+                                      columns=[f"pred_{c}" for c in st.session_state.le.classes_]),
+                         use_container_width=True)
+
+        # 係数・切片 | Coefficients & intercepts
+        st.subheader("モデル係数と切片 | Model Coefficients & Intercepts")
         coef_df = pd.DataFrame(
             st.session_state.clf.coef_,
             columns=[f"{feat_cols[0]}(coef)", f"{feat_cols[1]}(coef)"]
@@ -251,19 +287,21 @@ if st.session_state.trained:
         intercept_df["class_index"] = np.arange(intercept_df.shape[0])
         intercept_df["original_label"] = [
             st.session_state.le.classes_[i] if i < len(st.session_state.le.classes_) else None
-        for i in intercept_df["class_index"]]
+            for i in intercept_df["class_index"]
+        ]
         st.dataframe(intercept_df, use_container_width=True)
 
-        with st.expander("NumPy配列（print 相当）"):
+        with st.expander("NumPy配列（print 相当） | Raw NumPy arrays (print-like)"):
             st.write("`model.coef_`")
             st.write(st.session_state.clf.coef_)
             st.write("`model.intercept_`")
             st.write(st.session_state.clf.intercept_)
 
         # -----------------------------
-        # 6) 未知データ 1点の予測（学習済みを使用）
+        # 6) 未知データ（1サンプル）の予測 | Predict one unknown sample
         # -----------------------------
-        st.header("6) 未知データ（1サンプル）の予測")
+        st.header("6) 未知データ（1サンプル）の予測 | Predict for One Unknown Sample")
+
         def safe_stats(series: pd.Series):
             vals = pd.to_numeric(series, errors="coerce").to_numpy()
             vals = vals[np.isfinite(vals)]
@@ -272,6 +310,10 @@ if st.session_state.trained:
             return np.nanmin(vals), np.nanmax(vals), np.nanmedian(vals)
 
         def number_input_safe(label: str, default: float, vmin: float, vmax: float):
+            """
+            min/max が有効な場合だけ境界を設定。そうでなければ制約なし。
+            | Set min/max only if valid; otherwise no bounds.
+            """
             kwargs = {"value": float(default) if np.isfinite(default) else 0.0, "format": "%.6f"}
             if np.isfinite(vmin) and np.isfinite(vmax) and (vmax > vmin):
                 step = (vmax - vmin) / 100.0
@@ -284,12 +326,16 @@ if st.session_state.trained:
 
         f1_min, f1_max, f1_med = safe_stats(work_df[feat_cols[0]])
         f2_min, f2_max, f2_med = safe_stats(work_df[feat_cols[1]])
-        st.write("※ 入力は **生の値**（標準化前）。内部で学習時と同じスケーラーを適用します。")
+
+        st.write(
+            "入力値は **標準化前（生値）** を入れてください。内部で学習時と同じスケーラーを適用します。"
+            " | Enter **raw (unstandardized)** values. The same scaler as training will be applied internally."
+        )
 
         u_f1 = number_input_safe(f"{feat_cols[0]} (sample)", f1_med, f1_min, f1_max)
         u_f2 = number_input_safe(f"{feat_cols[1]} (sample)", f2_med, f2_min, f2_max)
 
-        predict_btn = st.button("未知サンプルを予測", type="primary")
+        predict_btn = st.button("未知サンプルを予測 | Predict Unknown Sample", type="primary")
         if predict_btn:
             try:
                 unknown_raw = np.array([[float(u_f1), float(u_f2)]], dtype=float)
@@ -310,17 +356,20 @@ if st.session_state.trained:
                     "pred_index": [int(pred_idx[0])]
                 })
 
-                st.subheader("予測結果（クラス）")
+                st.subheader("予測結果（クラス） | Predicted Class")
                 st.dataframe(result_df, use_container_width=True)
 
                 prob_cols = [f"proba_{c}" for c in st.session_state.le.classes_]
                 prob_df = pd.DataFrame(pred_prob, columns=prob_cols, index=["sample_1"])
-                st.subheader("予測確率")
+                st.subheader("予測確率 | Predicted Probabilities")
                 st.dataframe(prob_df, use_container_width=True)
             except Exception as e:
-                st.error("未知サンプルの予測でエラーが発生しました。")
+                st.error("未知サンプルの予測でエラーが発生しました。 | Error occurred during prediction.")
                 st.exception(e)
 else:
-    st.info("まだ学習していません。「学習・評価を実行」をクリックしてください。")
+    st.info("まだ学習していません。「学習・評価を実行」をクリックしてください。 | Not trained yet. Click 'Train & Evaluate'.")
 
-st.caption("※ 決定境界プロット（mlxtend）は**2次元特徴量のみ対応**です。3列以上は選ばないでください。")
+st.caption(
+    "注意：mlxtend の決定境界プロットは **2次元特徴量のみ対応** です。"
+    " | Note: mlxtend decision-region plotting supports **2D features only**."
+)
